@@ -97,8 +97,14 @@ func GithubPush(ctx context.Context, input Input, repoLimiter *time.Ticker, push
 	cmd = Command{Path: "git", Args: []string{"push", "-f", "origin", gitHeadBranch}}
 	gitPush := exec.CommandContext(ctx, cmd.Path, cmd.Args...)
 	gitPush.Dir = input.PlanDir
-	if output, err := gitPush.CombinedOutput(); err != nil {
-		return Output{Success: false}, errors.New(string(output))
+	if pushOutput, err := gitPush.CombinedOutput(); err != nil {
+		forkOut, err := tryToFork(ctx, input)
+		if err != nil {
+			bytes := append(append(pushOutput, []byte("\n")...), forkOut...)
+			return Output{Success: false}, errors.New(string(bytes))
+		}
+
+		return Output{Success: false}, errors.New(string(pushOutput))
 	}
 
 	// Open a pull request, if one doesn't exist already
@@ -169,6 +175,29 @@ func GithubPush(ctx context.Context, input Input, repoLimiter *time.Ticker, push
 		PullRequestAssignee:       input.PRAssignee,
 		CircleCIBuildURL:          circleCIBuildURL,
 	}, nil
+}
+
+func tryToFork(ctx context.Context, input Input) ([]byte, error) {
+	repo := fmt.Sprintf("github.cbhq.net/%s", input.Repo.String())
+	forkName := fmt.Sprintf("batch_%s", strings.ReplaceAll(repo, "/", "_"))
+	cmd := exec.CommandContext(ctx, "gh", "repo", "fork", "--remote=true", "--forkname", forkName)
+	cmd.Dir = input.PlanDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return out, err
+	}
+
+	cmd = exec.CommandContext(ctx, "gh", "repo", "set-default", repo)
+	cmd.Dir = input.PlanDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return out, err
+	}
+	cmd = exec.CommandContext(ctx, "git", "push", "origin", input.BranchName)
+	cmd.Dir = input.PlanDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return out, err
+	}
+
+	return nil, nil
 }
 
 func findOrCreatePR(ctx context.Context, client *github.Client, owner string, name string, pull *github.NewPullRequest, repoLimiter *time.Ticker, pushLimiter *time.Ticker) (*github.PullRequest, error) {

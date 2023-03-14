@@ -13,6 +13,10 @@ type Repo struct {
 	ProviderConfig
 }
 
+func (r Repo) String() string {
+	return fmt.Sprintf("%s/%s", r.Owner, r.Name)
+}
+
 func (r Repo) IsGithub() bool {
 	return r.ProviderConfig.Backend == "github"
 }
